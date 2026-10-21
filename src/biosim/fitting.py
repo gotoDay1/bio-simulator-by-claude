@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import least_squares
 
+from biosim.conditions import ConditionProfile
 from biosim.exceptions import FittingError, IntegrationError, InvalidParameterError
 from biosim.operation_modes import OperationMode
 from biosim.results import SimulationResults
@@ -14,6 +15,12 @@ from biosim.state import InitialConditions
 CATEGORY_ORDER = ("growth", "product", "substrate", "oxygen")
 _MEASUREMENT_COLUMNS = ("X", "S", "P")
 _PENALTY_RESIDUAL_VALUE = 1e6
+# Relative step for least_squares' finite-difference Jacobian. The default (~1.5e-8) is far
+# below the ODE solver's own error (rtol=1e-6), so the numerical derivative of the
+# simulated trajectory is mostly solver noise and the optimizer can stall far from the
+# optimum (e.g. a shift-culture fit of the maintenance coefficient stopped at 0.0137 for a
+# true 0.030). A step well above solver noise recovers it.
+_FD_REL_STEP = 1e-4
 
 
 @dataclass
@@ -107,6 +114,7 @@ def fit_batch(
     experimental_data: pd.DataFrame,
     n_points: int = 200,
     n_starts: int = 8,
+    condition_profile: ConditionProfile | None = None,
 ) -> FitResult:
     """Fit the free parameters of model_specs against experimental_data for one batch.
 
@@ -119,6 +127,9 @@ def fit_batch(
     single run from one initial guess can settle into a local minimum (common with
     correlated parameters like Monod's mu_max/Ks). n_starts >= 1 candidate starting points
     are tried (see _generate_start_points) and the lowest-cost result is kept.
+
+    condition_profile gives this batch's temperature/pH history (default: constant
+    30 C / pH 5.0); each batch should be fit with its own profile.
     """
     specs_by_category = {spec.category: spec for spec in model_specs}
     missing = [c for c in CATEGORY_ORDER if c not in specs_by_category]
@@ -219,6 +230,7 @@ def fit_batch(
             initial_conditions=initial_conditions,
             t_span=(0.0, t_max),
             n_points=n_points,
+            condition_profile=condition_profile,
         )
 
     x0_arr = np.array(x0, dtype=float)
@@ -247,7 +259,13 @@ def fit_batch(
     start_points = _generate_start_points(x0_arr, lower_arr, upper_arr, n_starts)
     opt = None
     for start in start_points:
-        candidate = least_squares(residual, start, bounds=(lower_arr, upper_arr), max_nfev=2000)
+        candidate = least_squares(
+            residual,
+            start,
+            bounds=(lower_arr, upper_arr),
+            max_nfev=2000,
+            diff_step=_FD_REL_STEP,
+        )
         if opt is None or candidate.cost < opt.cost:
             opt = candidate
 

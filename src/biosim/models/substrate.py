@@ -31,3 +31,19 @@ class YieldMaintenanceSubstrate(SubstrateModel):
         if self.Yps is not None:
             rate -= (1.0 / self.Yps) * dPdt
         return rate
+
+
+@dataclass
+class GrowthDrivenSubstrate(SubstrateModel):
+    """Adds no substrate consumption of its own.
+
+    For growth models with drives_substrate=True (e.g. PirtMonodGrowth), the orchestrator
+    takes dS/dt = -qS*X directly from the growth model, so that growth and substrate use
+    one consistent set of yield/maintenance parameters. This placeholder has no
+    parameters; the substrate side is entirely defined by the growth model.
+    """
+
+    name = "growth_driven"
+
+    def consumption_rate(self, X: float, dXdt: float, dPdt: float, t: float) -> float:
+        return 0.0

@@ -4,8 +4,10 @@ import numpy as np
 import pandas as pd
 from scipy.integrate import solve_ivp
 
+from biosim.conditions import ConditionProfile, Conditions
 from biosim.exceptions import IntegrationError, InvalidParameterError
 from biosim.models.base import GrowthModel, OxygenModel, ProductModel, SubstrateModel
+from biosim.models.substrate import GrowthDrivenSubstrate
 from biosim.operation_modes import OperationMode
 from biosim.results import SimulationResults
 from biosim.state import InitialConditions, StateLayout
@@ -21,6 +23,12 @@ class BioreactorSimulation:
     OperationMode supplies for F_in(t), F_out(t), and feed concentrations
     (F_out only affects dV/dt - it cancels out of the concentration balance
     under the standard well-mixed-tank assumption).
+
+    condition_profile supplies temperature/pH as prescribed inputs T(t), pH(t) (default:
+    constant 30 C / pH 5.0). Models that declare condition_aware = True receive the
+    current Conditions; all others are called exactly as before. A growth model with
+    drives_substrate = True (e.g. PirtMonodGrowth) defines substrate uptake itself and
+    must be paired with GrowthDrivenSubstrate (and vice versa).
     """
 
     def __init__(
@@ -34,6 +42,7 @@ class BioreactorSimulation:
         t_span: tuple[float, float],
         n_points: int = 200,
         solver_kwargs: dict | None = None,
+        condition_profile: ConditionProfile | None = None,
     ):
         self.growth_model = growth_model
         self.product_model = product_model
@@ -44,21 +53,53 @@ class BioreactorSimulation:
         self.t_span = t_span
         self.n_points = n_points
         self.solver_kwargs = solver_kwargs or {}
+        self.condition_profile = condition_profile or ConditionProfile()
         if growth_model.requires_oxygen_state and not oxygen_model.supports_supply_dynamics:
             raise InvalidParameterError(
                 f"{type(growth_model).__name__} requires an oxygen model that tracks "
                 f"dissolved-O2 supply dynamics (e.g. OxygenWithKLa), but "
                 f"{type(oxygen_model).__name__} does not track C_O2 as a state."
             )
+        if growth_model.drives_substrate and not isinstance(
+            substrate_model, GrowthDrivenSubstrate
+        ):
+            raise InvalidParameterError(
+                f"{type(growth_model).__name__} defines substrate uptake itself and must be "
+                f"paired with GrowthDrivenSubstrate, not {type(substrate_model).__name__}."
+            )
+        if isinstance(substrate_model, GrowthDrivenSubstrate) and not growth_model.drives_substrate:
+            raise InvalidParameterError(
+                "GrowthDrivenSubstrate needs a growth model that defines substrate uptake "
+                f"(drives_substrate=True); {type(growth_model).__name__} does not."
+            )
         self.layout = StateLayout(oxygen_model.supports_supply_dynamics)
+
+    def _growth_rate(self, X: float, S: float, t: float, C_O2, cond: Conditions) -> float:
+        if self.growth_model.condition_aware:
+            return self.growth_model.specific_growth_rate(X, S, t, C_O2, cond=cond)
+        return self.growth_model.specific_growth_rate(X, S, t, C_O2)
+
+    def _product_rate(self, X: float, P: float, dXdt: float, t: float, cond: Conditions) -> float:
+        if self.product_model.condition_aware:
+            return self.product_model.production_rate(X, P, dXdt, t, cond=cond)
+        return self.product_model.production_rate(X, P, dXdt, t)
+
+    def _substrate_rate(
+        self, X: float, S: float, t: float, C_O2, dXdt: float, dPdt: float, cond: Conditions
+    ) -> float:
+        if self.growth_model.drives_substrate:
+            qS = self.growth_model.specific_substrate_uptake(X, S, t, C_O2, cond=cond)
+            return -qS * X
+        return self.substrate_model.consumption_rate(X, dXdt, dPdt, t)
 
     def _rhs(self, t: float, y: np.ndarray) -> np.ndarray:
         X, S, P, C_O2, V = self.layout.unpack(y)
 
-        mu = self.growth_model.specific_growth_rate(X, S, t, C_O2)
+        cond = self.condition_profile.at(t)
+        mu = self._growth_rate(X, S, t, C_O2, cond)
         dXdt_rxn = mu * X
-        dPdt_rxn = self.product_model.production_rate(X, P, dXdt_rxn, t)
-        dSdt_rxn = self.substrate_model.consumption_rate(X, dXdt_rxn, dPdt_rxn, t)
+        dPdt_rxn = self._product_rate(X, P, dXdt_rxn, t, cond)
+        dSdt_rxn = self._substrate_rate(X, S, t, C_O2, dXdt_rxn, dPdt_rxn, cond)
         our = self.oxygen_model.demand_rate(X, dXdt_rxn, t)
 
         F_in = self.operation_mode.inflow_rate(t, V)
@@ -127,7 +168,7 @@ class BioreactorSimulation:
         for i in range(n):
             X, S, _P, C_O2, _V = self.layout.unpack(sol.y[:, i])
             t = sol.t[i]
-            mu = self.growth_model.specific_growth_rate(X, S, t, C_O2)
+            mu = self._growth_rate(X, S, t, C_O2, self.condition_profile.at(t))
             mu_vals[i] = mu
             our_vals[i] = self.oxygen_model.demand_rate(X, mu * X, t)
             if otr_vals is not None:

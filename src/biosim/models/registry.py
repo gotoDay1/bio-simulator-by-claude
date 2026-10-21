@@ -8,6 +8,7 @@ from biosim.models.growth import (
 )
 from biosim.models.oxygen import OxygenDemandOnly, OxygenWithKLa
 from biosim.models.product import (
+    InducibleLuedekingPiretProduct,
     LuedekingPiretProduct,
     NoProduct,
     TemperatureLuedekingPiretProduct,
@@ -25,6 +26,7 @@ GROWTH_MODELS: dict[str, type[GrowthModel]] = {
 PRODUCT_MODELS: dict[str, type[ProductModel]] = {
     "luedeking_piret": LuedekingPiretProduct,
     "luedeking_piret_temp": TemperatureLuedekingPiretProduct,
+    "luedeking_piret_induced": InducibleLuedekingPiretProduct,
     "none": NoProduct,
 }
 

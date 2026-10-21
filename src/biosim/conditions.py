@@ -27,10 +27,16 @@ _KELVIN = 273.15
 
 @dataclass(frozen=True)
 class Conditions:
-    """Culture conditions at one instant: temperature (deg C) and pH."""
+    """Culture conditions at one instant: temperature (deg C), pH and inducer (uM).
+
+    T_C and pH are prescribed by a ConditionProfile; `inducer` is the inducer concentration
+    in the tank, which the orchestrator fills in from the state vector (it is 0.0 in a
+    snapshot taken straight from a profile).
+    """
 
     T_C: float = T_REF_C
     pH: float = PH_REF
+    inducer: float = 0.0
 
 
 def arrhenius_factor(T_C: float, Ea: float, T_ref_C: float = T_REF_C) -> float:

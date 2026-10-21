@@ -37,6 +37,7 @@ from biosim.fitting import (
     fit_batch,
     fit_results_to_dataframe,
 )
+from biosim.inducer import InducerDose, standard_induction
 from biosim.models.base import GrowthModel, OxygenModel, ProductModel, SubstrateModel
 from biosim.models.growth import (
     GompertzGrowth,
@@ -47,6 +48,7 @@ from biosim.models.growth import (
 )
 from biosim.models.oxygen import OxygenDemandOnly, OxygenWithKLa
 from biosim.models.product import (
+    InducibleLuedekingPiretProduct,
     LuedekingPiretProduct,
     NoProduct,
     TemperatureLuedekingPiretProduct,
@@ -104,6 +106,8 @@ __all__ = [
     "GrowthDrivenSubstrate",
     "GrowthModel",
     "HistoricalObjective",
+    "InducerDose",
+    "InducibleLuedekingPiretProduct",
     "InitialConditions",
     "IntegrationError",
     "InvalidParameterError",
@@ -148,6 +152,7 @@ __all__ = [
     "resolve_model_classes",
     "sample_parameters",
     "shift_value",
+    "standard_induction",
     "step_feed",
     "stepwise_feed",
     "suggest_next_experiment",

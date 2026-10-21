@@ -7,6 +7,7 @@ from scipy.optimize import least_squares
 
 from biosim.conditions import ConditionProfile
 from biosim.exceptions import FittingError, IntegrationError, InvalidParameterError
+from biosim.inducer import InducerDose
 from biosim.operation_modes import OperationMode
 from biosim.results import SimulationResults
 from biosim.simulation import BioreactorSimulation
@@ -115,6 +116,7 @@ def fit_batch(
     n_points: int = 200,
     n_starts: int = 8,
     condition_profile: ConditionProfile | None = None,
+    inducer_events: list[InducerDose] | None = None,
 ) -> FitResult:
     """Fit the free parameters of model_specs against experimental_data for one batch.
 
@@ -129,7 +131,8 @@ def fit_batch(
     are tried (see _generate_start_points) and the lowest-cost result is kept.
 
     condition_profile gives this batch's temperature/pH history (default: constant
-    30 C / pH 5.0); each batch should be fit with its own profile.
+    30 C / pH 5.0); each batch should be fit with its own profile. inducer_events gives
+    the batch's inducer doses (requires an inducible product model).
     """
     specs_by_category = {spec.category: spec for spec in model_specs}
     missing = [c for c in CATEGORY_ORDER if c not in specs_by_category]
@@ -231,6 +234,7 @@ def fit_batch(
             t_span=(0.0, t_max),
             n_points=n_points,
             condition_profile=condition_profile,
+            inducer_events=inducer_events,
         )
 
     x0_arr = np.array(x0, dtype=float)

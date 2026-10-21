@@ -99,7 +99,15 @@ GUIの「Bayes Prediction」ページ（`app/pages/3_bayes_prediction.py`）か�
 
 温度依存は基準温度（30 ℃）で再パラメータ化した Arrhenius 型 `k(T) = k_ref·exp[−Ea/R·(1/T − 1/T_ref)]`（Ea は kJ/mol）、Y は温度の1次、m の pH 補正は pH 5.0 まわりの2次式です。定速フィードで S≈0 のとき、総菌体量 `x = X·V` は `x(t) = x_ss − (x_ss − x0)·exp(−Y·m·t)`、`x_ss = F·S_f/m` の解析解に一致します（`tests/test_temperature_models.py`）。実行例は `examples/temperature_shift_example.py`。
 
-**未実装**: 誘導剤濃度の状態（β の誘導依存・EC50）、温度シフト直後の順応ラグ、β/k_d への pH 依存。
+### 誘導剤の添加と β の誘導依存
+
+誘導剤は**瞬時に終濃度になる添加イベント**として与えます（`src/biosim/inducer.py`）。`BioreactorSimulation(..., inducer_events=[InducerDose(56.0, 300.0)])`、標準レシピ（32/56/80 h に 300 µM）は `standard_induction()` です。`fit_batch(..., inducer_events=...)` も同様に、バッチごとの添加履歴を渡します。
+
+- 誘導剤の濃度 `I`（µM）が状態に加わり、添加の間はフィードによる希釈だけで下がります（`I·V` が保存される。分解は無し）。添加時刻で積分を区切って再開するので、不連続を `solve_ivp` が跨ぎません。出力の時刻はそのままで、添加時刻の値は添加後の値です。
+- `mode="set"`（既定）は「終濃度 C まで引き上げる」（残っている誘導剤も C に数える）、`mode="add"` は「いまの濃度に C を足す」です。実験で「終濃度300 µM」をどちらの意味で運用しているかに合わせて選びます。
+- `InducibleLuedekingPiretProduct`（`product: luedeking_piret_induced`）: `β(T, C) = A(T)·[β_basal + β_max·Cⁿ/(EC50ⁿ + Cⁿ)]`。無誘導の基礎発現 `β_basal`、飽和時の上乗せ `β_max`、半飽和濃度 `EC50`、Hill 係数 `hill_n`（1 で双曲線）。誘導剤イベントはこのモデルでだけ使えます（他のモデルに渡すとエラー）。
+
+**未実装**: 温度シフト直後の順応ラグと、誘導から β が立ち上がるまでの遅れ（応答は瞬時と仮定）、β/k_d への pH 依存。
 
 ---
 

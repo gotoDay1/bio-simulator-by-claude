@@ -1,4 +1,6 @@
+import dataclasses
 import warnings
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -6,6 +8,7 @@ from scipy.integrate import solve_ivp
 
 from biosim.conditions import ConditionProfile, Conditions
 from biosim.exceptions import IntegrationError, InvalidParameterError
+from biosim.inducer import InducerDose
 from biosim.models.base import GrowthModel, OxygenModel, ProductModel, SubstrateModel
 from biosim.models.substrate import GrowthDrivenSubstrate
 from biosim.operation_modes import OperationMode
@@ -29,6 +32,13 @@ class BioreactorSimulation:
     current Conditions; all others are called exactly as before. A growth model with
     drives_substrate = True (e.g. PirtMonodGrowth) defines substrate uptake itself and
     must be paired with GrowthDrivenSubstrate (and vice versa).
+
+    inducer_events are instantaneous InducerDose additions. They require an inducible
+    product model (inducible = True), which puts the inducer concentration I (uM) into the
+    state vector: it is diluted by the feed (dI/dt = -(F_in/V)*I) and jumps at each dose.
+    The integration is split at the dosing times (the jump is a discontinuity the adaptive
+    solver must not step across); a dose at or before t_span[0] is applied to the initial
+    state and doses after t_span[1] are ignored.
     """
 
     def __init__(
@@ -43,6 +53,7 @@ class BioreactorSimulation:
         n_points: int = 200,
         solver_kwargs: dict | None = None,
         condition_profile: ConditionProfile | None = None,
+        inducer_events: Sequence[InducerDose] | None = None,
     ):
         self.growth_model = growth_model
         self.product_model = product_model
@@ -54,6 +65,12 @@ class BioreactorSimulation:
         self.n_points = n_points
         self.solver_kwargs = solver_kwargs or {}
         self.condition_profile = condition_profile or ConditionProfile()
+        self.inducer_events = sorted(inducer_events or [], key=lambda e: e.t)
+        if self.inducer_events and not product_model.inducible:
+            raise InvalidParameterError(
+                f"inducer_events were given but {type(product_model).__name__} does not "
+                "respond to an inducer (inducible=False); use an inducible product model."
+            )
         if growth_model.requires_oxygen_state and not oxygen_model.supports_supply_dynamics:
             raise InvalidParameterError(
                 f"{type(growth_model).__name__} requires an oxygen model that tracks "
@@ -72,7 +89,13 @@ class BioreactorSimulation:
                 "GrowthDrivenSubstrate needs a growth model that defines substrate uptake "
                 f"(drives_substrate=True); {type(growth_model).__name__} does not."
             )
-        self.layout = StateLayout(oxygen_model.supports_supply_dynamics)
+        self.layout = StateLayout(oxygen_model.supports_supply_dynamics, product_model.inducible)
+
+    def _conditions(self, t: float, y: np.ndarray) -> Conditions:
+        cond = self.condition_profile.at(t)
+        if self.layout.has_inducer_state:
+            cond = dataclasses.replace(cond, inducer=self.layout.inducer(y))
+        return cond
 
     def _growth_rate(self, X: float, S: float, t: float, C_O2, cond: Conditions) -> float:
         if self.growth_model.condition_aware:
@@ -95,7 +118,7 @@ class BioreactorSimulation:
     def _rhs(self, t: float, y: np.ndarray) -> np.ndarray:
         X, S, P, C_O2, V = self.layout.unpack(y)
 
-        cond = self.condition_profile.at(t)
+        cond = self._conditions(t, y)
         mu = self._growth_rate(X, S, t, C_O2, cond)
         dXdt_rxn = mu * X
         dPdt_rxn = self._product_rate(X, P, dXdt_rxn, t, cond)
@@ -117,6 +140,9 @@ class BioreactorSimulation:
             otr = self.oxygen_model.supply_rate(C_O2, t)
             dC_O2 = our + otr + dilution * (self.operation_mode.C_O2_feed - C_O2)
             dydt[self.layout.idx_C_O2] = self._floor_rate_near_zero(C_O2, dC_O2)
+        if self.layout.has_inducer_state:
+            # the feed carries no inducer: it only dilutes what is in the tank
+            dydt[self.layout.idx_I] = -dilution * y[self.layout.idx_I]
         dydt[self.layout.idx_V] = F_in - F_out
         return dydt
 
@@ -144,31 +170,62 @@ class BioreactorSimulation:
 
     def run(self) -> SimulationResults:
         y0 = self.layout.build_initial_vector(self.initial_conditions)
-        t_eval = np.linspace(self.t_span[0], self.t_span[1], self.n_points)
+        t0, t_end = self.t_span
+        t_eval = np.linspace(t0, t_end, self.n_points)
 
         solver_kwargs = {"method": "LSODA", "rtol": 1e-6, "atol": 1e-9}
         solver_kwargs.update(self.solver_kwargs)
 
-        sol = solve_ivp(self._rhs, self.t_span, y0, t_eval=t_eval, **solver_kwargs)
-        if not sol.success:
-            raise IntegrationError(f"ODE integration failed: {sol.message}")
+        # doses at or before the start act on the initial state; later ones split the run
+        y = y0.copy()
+        pending: list[InducerDose] = []
+        for dose in self.inducer_events:
+            if dose.t <= t0:
+                y[self.layout.idx_I] = dose.apply(y[self.layout.idx_I])
+            elif dose.t < t_end:
+                pending.append(dose)
 
-        return self._build_results(sol)
+        ts: list[np.ndarray] = []
+        ys: list[np.ndarray] = []
+        seg_start = t0
+        boundaries = sorted({d.t for d in pending}) + [t_end]
+        for seg_end in boundaries:
+            last = seg_end == t_end
+            upper_ok = (t_eval <= seg_end) if last else (t_eval < seg_end)
+            inside = t_eval[(t_eval >= seg_start) & upper_ok]
+            # always integrate to seg_end so the state there is known, but report only the
+            # points in [seg_start, seg_end) (the last segment also reports seg_end): at a
+            # dose time the reported value is the post-dose one, from the next segment
+            t_solve = np.union1d(inside, [seg_end])
+            sol = solve_ivp(self._rhs, (seg_start, seg_end), y, t_eval=t_solve, **solver_kwargs)
+            if not sol.success:
+                raise IntegrationError(f"ODE integration failed: {sol.message}")
+            keep = np.isin(sol.t, inside)
+            if keep.any():
+                ts.append(sol.t[keep])
+                ys.append(sol.y[:, keep])
+            y = sol.y[:, -1].copy()
+            if not last:
+                for dose in (d for d in pending if d.t == seg_end):
+                    y[self.layout.idx_I] = dose.apply(y[self.layout.idx_I])
+            seg_start = seg_end
 
-    def _build_results(self, sol) -> SimulationResults:
-        data: dict[str, np.ndarray] = {"t": sol.t}
+        return self._build_results(np.concatenate(ts), np.concatenate(ys, axis=1))
+
+    def _build_results(self, t_out: np.ndarray, y_out: np.ndarray) -> SimulationResults:
+        data: dict[str, np.ndarray] = {"t": t_out}
         for i, name in enumerate(self.layout.column_names()):
-            data[name] = sol.y[i]
+            data[name] = y_out[i]
 
-        n = len(sol.t)
+        n = len(t_out)
         mu_vals = np.zeros(n)
         our_vals = np.zeros(n)
         otr_vals = np.zeros(n) if self.layout.has_oxygen_state else None
 
         for i in range(n):
-            X, S, _P, C_O2, _V = self.layout.unpack(sol.y[:, i])
-            t = sol.t[i]
-            mu = self._growth_rate(X, S, t, C_O2, self.condition_profile.at(t))
+            X, S, _P, C_O2, _V = self.layout.unpack(y_out[:, i])
+            t = t_out[i]
+            mu = self._growth_rate(X, S, t, C_O2, self._conditions(t, y_out[:, i]))
             mu_vals[i] = mu
             our_vals[i] = self.oxygen_model.demand_rate(X, mu * X, t)
             if otr_vals is not None:
@@ -185,7 +242,7 @@ class BioreactorSimulation:
 
     @staticmethod
     def _warn_if_negative(df: pd.DataFrame, tol: float = -1e-3) -> None:
-        for col in ("X", "S", "P", "C_O2", "V"):
+        for col in ("X", "S", "P", "C_O2", "I", "V"):
             if col in df.columns and (df[col] < tol).any():
                 warnings.warn(
                     f"Simulated '{col}' went negative (min={df[col].min():.4g}). "

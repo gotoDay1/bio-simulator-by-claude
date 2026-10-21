@@ -48,11 +48,14 @@ class GrowthModel(ABC):
 class ProductModel(ABC):
     """Returns dP/dt from reaction kinetics only (dilution/feed terms are added by the orchestrator).
 
-    A model with condition_aware = True also accepts a `cond` keyword (Conditions: T, pH).
+    A model with condition_aware = True also accepts a `cond` keyword (Conditions: T, pH,
+    inducer). inducible = True additionally asks the orchestrator to track the inducer
+    concentration as a state (cond.inducer); such a model is condition_aware as well.
     """
 
     name: ClassVar[str]
     condition_aware: ClassVar[bool] = False
+    inducible: ClassVar[bool] = False
 
     @abstractmethod
     def production_rate(self, X: float, P: float, dXdt: float, t: float) -> float:

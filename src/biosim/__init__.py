@@ -1,3 +1,13 @@
+from biosim.conditions import (
+    ConditionProfile,
+    Conditions,
+    arrhenius_factor,
+    constant_value,
+    piecewise_value,
+    quadratic_factor,
+    ramp_value,
+    shift_value,
+)
 from biosim.exceptions import (
     BiosimError,
     ExperimentalDataError,
@@ -28,16 +38,26 @@ from biosim.fitting import (
     fit_results_to_dataframe,
 )
 from biosim.models.base import GrowthModel, OxygenModel, ProductModel, SubstrateModel
-from biosim.models.growth import GompertzGrowth, LogisticGrowth, MonodGrowth, MonodGrowthO2
+from biosim.models.growth import (
+    GompertzGrowth,
+    LogisticGrowth,
+    MonodGrowth,
+    MonodGrowthO2,
+    PirtMonodGrowth,
+)
 from biosim.models.oxygen import OxygenDemandOnly, OxygenWithKLa
-from biosim.models.product import LuedekingPiretProduct, NoProduct
+from biosim.models.product import (
+    LuedekingPiretProduct,
+    NoProduct,
+    TemperatureLuedekingPiretProduct,
+)
 from biosim.models.registry import (
     GROWTH_MODELS,
     OXYGEN_MODELS,
     PRODUCT_MODELS,
     SUBSTRATE_MODELS,
 )
-from biosim.models.substrate import YieldMaintenanceSubstrate
+from biosim.models.substrate import GrowthDrivenSubstrate, YieldMaintenanceSubstrate
 from biosim.operation_modes import (
     Batch,
     Chemostat,
@@ -71,6 +91,8 @@ __all__ = [
     "BiosimError",
     "CandidateEvaluation",
     "Chemostat",
+    "ConditionProfile",
+    "Conditions",
     "ExperimentDesignError",
     "ExperimentSuggestion",
     "ExperimentalDataError",
@@ -79,6 +101,7 @@ __all__ = [
     "FitResult",
     "FittingError",
     "GompertzGrowth",
+    "GrowthDrivenSubstrate",
     "GrowthModel",
     "HistoricalObjective",
     "InitialConditions",
@@ -98,14 +121,18 @@ __all__ = [
     "ParameterPrediction",
     "ParameterPredictionModel",
     "ParameterSpec",
+    "PirtMonodGrowth",
     "PredictionError",
     "ProductModel",
     "SimulationResults",
     "StateLayout",
     "SubstrateModel",
+    "TemperatureLuedekingPiretProduct",
     "YieldMaintenanceSubstrate",
+    "arrhenius_factor",
     "compute_historical_objectives",
     "constant_feed",
+    "constant_value",
     "evaluate_condition",
     "exponential_feed",
     "fit_batch",
@@ -113,10 +140,14 @@ __all__ = [
     "fit_results_to_dataframe",
     "load_experimental_csv",
     "load_feed_profile_csv",
+    "piecewise_value",
     "predict_parameters",
     "predictions_to_dataframe",
+    "quadratic_factor",
+    "ramp_value",
     "resolve_model_classes",
     "sample_parameters",
+    "shift_value",
     "step_feed",
     "stepwise_feed",
     "suggest_next_experiment",

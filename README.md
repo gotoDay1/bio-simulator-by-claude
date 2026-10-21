@@ -85,6 +85,24 @@ GUIの「Bayes Prediction」ページ（`app/pages/3_bayes_prediction.py`）か�
 
 ---
 
+## 温度・pH 条件と基質律速モデル
+
+温度・pH は ODE の状態ではなく、フィードと同じ**時間の入力** `T(t)`, `pH(t)` として与えます（`src/biosim/conditions.py`）。`BioreactorSimulation(..., condition_profile=ConditionProfile(temperature_fn, pH_fn))` で渡し、省略時は標準条件（30 ℃ / pH 5.0）です。`shift_value(30, 24, 48)`（48 h で 30→24 ℃）、`ramp_value`、`piecewise_value` が使えます。`fit_batch(..., condition_profile=...)` も同様で、バッチごとに自分の条件履歴を渡します。
+
+温度に依存するモデル（`condition_aware = True`）だけが現在の条件を受け取ります。既存モデルは従来どおりのシグネチャで動きます。
+
+| モデル | レジストリ名 | 内容 |
+|---|---|---|
+| `PirtMonodGrowth` | `growth: pirt_monod` | `qS = qSmax(T)·S/(Ks+S)`、`μ = Y(T)·(qS − m(T,pH))`。μmax を持たず、温度の効果は Y と m に現れる |
+| `GrowthDrivenSubstrate` | `substrate: growth_driven` | 基質消費を持たない。`pirt_monod` が `dS/dt = −qS·X` を定めるため、必ず対で使う（組み合わせを誤ると構築時にエラー） |
+| `TemperatureLuedekingPiretProduct` | `product: luedeking_piret_temp` | `dP/dt = α·max(dX/dt,0) + β(T)·X − k_d(T)·P` |
+
+温度依存は基準温度（30 ℃）で再パラメータ化した Arrhenius 型 `k(T) = k_ref·exp[−Ea/R·(1/T − 1/T_ref)]`（Ea は kJ/mol）、Y は温度の1次、m の pH 補正は pH 5.0 まわりの2次式です。定速フィードで S≈0 のとき、総菌体量 `x = X·V` は `x(t) = x_ss − (x_ss − x0)·exp(−Y·m·t)`、`x_ss = F·S_f/m` の解析解に一致します（`tests/test_temperature_models.py`）。実行例は `examples/temperature_shift_example.py`。
+
+**未実装**: 誘導剤濃度の状態（β の誘導依存・EC50）、温度シフト直後の順応ラグ、β/k_d への pH 依存。
+
+---
+
 ## 理論背景
 
 ### 1. 統一物質収支の枠組み

@@ -111,6 +111,36 @@ GUIの「Bayes Prediction」ページ（`app/pages/3_bayes_prediction.py`）か�
 
 ---
 
+## 操作ログ（Excel）と複数培養の同時フィッティング
+
+操作ログと分析値を 1 つの Excel（1 シート = 1 培養。シート名が培養名。`batch` 列があれば 1 シート内で培養を分割）にまとめて読み込みます。空欄は「値なし」です。
+
+| 列 | 内容 |
+|---|---|
+| `time` | 経過時間 [h]（日時でも可。先頭行からの経過時間に変換） |
+| `temperature`, `ph` | 設定値。空欄行は変更なし（次の入力までステップ保持。最初の入力前は 30 ℃ / pH 5.0） |
+| `induction` | その行で添加する誘導剤濃度 [µM]（1 行 1 回の添加。空欄/0 = 添加なし） |
+| `feed` | フィード速度 [L/h]（同上ステップ保持） |
+| `DCW`(`X`), `OD`, `S`, `P` | 分析値。OD は `od_to_dcw` で DCW に換算（DCW が空欄の行のみ） |
+
+```python
+from biosim import load_operation_log, fit_joint, fit_staged, FitStage
+
+cultures = load_operation_log("culture_log.xlsx", initial_conditions=ic, S_feed=100.0)
+result = fit_joint(cultures, model_specs)          # 全培養で共通パラメータを推定
+print(result.estimates, result.flags)
+
+staged = fit_staged(cultures, model_specs, [       # 段階フィット
+    FitStage("30℃ 成長", ["growth.Yxs_ref", "growth.ms_ref"], ["standard", "recipe2"], ["X"]),
+    FitStage("温度", ["growth.Ea_ms"], ["standard", "T24", "T36"], ["X"]),
+    FitStage("生産", ["product.beta_max", "product.EC50"], ["standard", "Cu150", "Cu600"], ["P"]),
+])
+```
+
+残差は列ごとに共通スケール（全培養での最大値、または `sigma`）で正規化します。`result.flags` は、相関 ≥ 0.95 のパラメータ対、境界張り付き、相対標準誤差が大きいパラメータ、残差数不足、条件数過大を警告します。
+
+**識別性の注意**: このモデルは x に対して線形なので、フィード量を変えても Y と m は分離できません（同じ x_ss = F·S_f/m, τ = 1/(Y·m) の組を再現するため）。分離を助けるのは温度変化（特に高温側へのシフト）で、培養数を増やすのはノイズの平均化にしかなりません。また実データでは Y は OD→DCW 換算係数と交絡します。
+
 ## 理論背景
 
 ### 1. 統一物質収支の枠組み

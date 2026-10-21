@@ -8,6 +8,7 @@ from biosim.conditions import (
     ramp_value,
     shift_value,
 )
+from biosim.culture import Culture, load_operation_log, parse_operation_log
 from biosim.exceptions import (
     BiosimError,
     ExperimentalDataError,
@@ -38,6 +39,7 @@ from biosim.fitting import (
     fit_results_to_dataframe,
 )
 from biosim.inducer import InducerDose, standard_induction
+from biosim.joint_fitting import FitStage, JointFitResult, fit_joint, fit_staged
 from biosim.models.base import GrowthModel, OxygenModel, ProductModel, SubstrateModel
 from biosim.models.growth import (
     GompertzGrowth,
@@ -95,12 +97,14 @@ __all__ = [
     "Chemostat",
     "ConditionProfile",
     "Conditions",
+    "Culture",
     "ExperimentDesignError",
     "ExperimentSuggestion",
     "ExperimentalDataError",
     "FedBatch",
     "FeedProfileError",
     "FitResult",
+    "FitStage",
     "FittingError",
     "GompertzGrowth",
     "GrowthDrivenSubstrate",
@@ -111,6 +115,7 @@ __all__ = [
     "InitialConditions",
     "IntegrationError",
     "InvalidParameterError",
+    "JointFitResult",
     "LogisticGrowth",
     "LuedekingPiretProduct",
     "ModelSpec",
@@ -140,10 +145,14 @@ __all__ = [
     "evaluate_condition",
     "exponential_feed",
     "fit_batch",
+    "fit_joint",
     "fit_parameter_models",
     "fit_results_to_dataframe",
+    "fit_staged",
     "load_experimental_csv",
     "load_feed_profile_csv",
+    "load_operation_log",
+    "parse_operation_log",
     "piecewise_value",
     "predict_parameters",
     "predictions_to_dataframe",
